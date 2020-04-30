@@ -378,7 +378,7 @@ dc_dp_dcmode_wrapper_register_qos_class2prio_cb(struct dc_dp_priv_dev_info *dev_
                                      int (*cb)(int32_t port_id, struct net_device *netif, uint8_t class2prio[]),
                                      int32_t flags)
 {
-    int32_t ret = -1;
+    int32_t ret = DC_DP_SUCCESS;
 
     if (dev_ctx && dev_ctx->dcmode && dev_ctx->dcmode->dcmode_ops && dev_ctx->dcmode->dcmode_ops->register_qos_class2prio_cb)
         ret = dev_ctx->dcmode->dcmode_ops->register_qos_class2prio_cb(dev_ctx->priv, port_id, netif, cb, flags);
@@ -392,7 +392,7 @@ int32_t
 dc_dp_dcmode_wrapper_map_class2devqos(struct dc_dp_priv_dev_info *dev_ctx,
                            int32_t port_id, struct net_device *netif, uint8_t class2prio[], uint8_t prio2devqos[])
 {
-    int32_t ret = -1;
+    int32_t ret = DC_DP_SUCCESS;
 
     if (dev_ctx && dev_ctx->dcmode && dev_ctx->dcmode->dcmode_ops && dev_ctx->dcmode->dcmode_ops->map_class2devqos)
         ret = dev_ctx->dcmode->dcmode_ops->map_class2devqos(dev_ctx->priv, port_id, netif, class2prio, prio2devqos);

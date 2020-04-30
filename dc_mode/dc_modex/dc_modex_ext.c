@@ -1478,30 +1478,6 @@ out:
  */
 
 static int32_t
-dcmode_ext_register_qos_class2prio_cb(void *ctx, int32_t port_id, struct net_device *netif,
-                                      int (*cb)(int32_t port_id, struct net_device *netif, uint8_t class2prio[]),
-                                      int32_t flags)
-{
-    int32_t ret = DC_DP_SUCCESS;
-
-    /* FIXME : For LGM, need to review. */
-#if !defined(CONFIG_X86_INTEL_LGM)
-#if IS_ENABLED(CONFIG_PPA)
-    struct dcmode_ext_dev_info *dev_ctx = (struct dcmode_ext_dev_info *)ctx;
-
-    /* Multiport sub-sequent device? */
-    if ( dev_ctx && is_multiport_sub(dev_ctx->alloc_flags) )
-        return DC_DP_SUCCESS;
-
-    if (ppa_register_qos_class2prio_hook_fn)
-        ret = ppa_register_qos_class2prio_hook_fn(port_id, netif, cb, flags);
-#endif /* #if IS_ENABLED(CONFIG_PPA) */
-#endif /* #if !defined(CONFIG_X86_INTEL_LGM) */
-
-    return ret;
-}
-
-static int32_t
 dcmode_ext_map_class2devqos(void *ctx, int32_t port_id, struct net_device *netif,
                             uint8_t class2prio[], uint8_t prio2devqos[])
 {
@@ -1626,7 +1602,7 @@ static struct dc_dp_dcmode_ops dcmode_ext_ops = {
     .disconn_if = dcmode_ext_disconn_if,
     .get_netif_stats = dcmode_ext_get_netif_stats,
     .clear_netif_stats = dcmode_ext_clear_netif_stats,
-    .register_qos_class2prio_cb = dcmode_ext_register_qos_class2prio_cb,
+    .register_qos_class2prio_cb = NULL,
     .map_class2devqos = dcmode_ext_map_class2devqos,
     .alloc_skb = NULL,
     .free_skb = NULL,
@@ -1642,6 +1618,33 @@ static struct dc_dp_dcmode dcmode_ext = {
     .dcmode_cap = DC_DP_F_DCMODE_HW | DC_DP_F_DCMODE_0,
     .dcmode_ops = &dcmode_ext_ops
 };
+
+#if !IS_ENABLED(CONFIG_X86_INTEL_LGM)
+#if IS_ENABLED(CONFIG_PPA)
+static int ppa_class2prio_event(PPA_NOTIFIER_BLOCK *nb,
+                                unsigned long action, void *ptr)
+{
+    struct ppa_class2prio_notifier_info *info;
+
+    switch (action) {
+    case PPA_CLASS2PRIO_DEFAULT:
+    case PPA_CLASS2PRIO_CHANGE:
+        info = (struct ppa_class2prio_notifier_info *)ptr;
+        if (info)
+            dc_dp_qos_class2prio(info->port_id, info->dev, info->class2prio);
+        break;
+    default:
+        break;
+    }
+
+    return PPA_NOTIFY_OK;
+}
+
+PPA_NOTIFIER_BLOCK ppa_class2prio_notifier = {
+	.notifier_call = ppa_class2prio_event
+};
+#endif
+#endif
 
 static __init int dcmode_ext_init_module(void)
 {
@@ -1660,6 +1663,9 @@ static __init int dcmode_ext_init_module(void)
 
 #if IS_ENABLED(CONFIG_PPA)
         ppa_check_if_netif_fastpath_fn = dc_dp_check_if_netif_fastpath;
+#if !IS_ENABLED(CONFIG_X86_INTEL_LGM)
+        ppa_register_event_notifier(&ppa_class2prio_notifier);
+#endif
 #endif /* #if IS_ENABLED(CONFIG_PPA) */
 
         g_dcmode_ext_init_ok = 1;
@@ -1672,6 +1678,9 @@ static __exit void dcmode_ext_exit_module(void)
 {
     if (g_dcmode_ext_init_ok) {
 #if IS_ENABLED(CONFIG_PPA)
+#if !IS_ENABLED(CONFIG_X86_INTEL_LGM)
+        ppa_unregister_event_notifier(&ppa_class2prio_notifier);
+#endif
         ppa_check_if_netif_fastpath_fn = NULL;
 #endif /* #if IS_ENABLED(CONFIG_PPA) */
 

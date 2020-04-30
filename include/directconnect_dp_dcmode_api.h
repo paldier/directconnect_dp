@@ -117,6 +117,9 @@ dc_dp_get_netif_subifid(struct net_device *netif, struct sk_buff *skb,
                         void *subif_data, uint8_t dst_mac[MAX_ETH_ALEN],
                         struct dp_subif *subif, uint32_t flags);
 
+extern int32_t
+dc_dp_qos_class2prio(int32_t port_id, struct net_device *netif, uint8_t *class2prio);
+
 int32_t
 dc_dp_get_dev_specific_desc_info(int32_t port_id, struct sk_buff *skb,
                                  struct dc_dp_fields_value_dw *desc_fields, uint32_t flags);

@@ -38,8 +38,6 @@
 static int32_t g_dc_dp_init_ok = 0;
 
 /* Function prototypes */
-static int32_t
-dc_dp_qos_class2prio_cb(int32_t port_id, struct net_device *netif, uint8_t *class2prio);
 
 /* Local */
 static inline uint8_t
@@ -340,7 +338,7 @@ dc_dp_register_dev(struct module *owner, uint32_t port_id,
     }
 
     if ((flags & DC_DP_F_QOS)) {
-        ret = dc_dp_dcmode_wrapper_register_qos_class2prio_cb(p_devinfo, port_id, dev, dc_dp_qos_class2prio_cb, DC_DP_F_QOS_DEV_REG);
+        ret = dc_dp_dcmode_wrapper_register_qos_class2prio_cb(p_devinfo, port_id, dev, dc_dp_qos_class2prio, DC_DP_F_QOS_DEV_REG);
         if (ret) {
             DC_DP_ERROR("failed to register class2prio callback!!!\n");
             /* FIXME : in this case, should we use skb->priority? */
@@ -926,8 +924,8 @@ out:
 }
 EXPORT_SYMBOL(dc_dp_get_netif_subifid);
 
-static int32_t
-dc_dp_qos_class2prio_cb(int32_t port_id, struct net_device *netif, uint8_t *class2prio)
+int32_t
+dc_dp_qos_class2prio(int32_t port_id, struct net_device *netif, uint8_t *class2prio)
 {
     int32_t ret;
     struct dc_dp_priv_dev_info *p_devinfo = NULL;
@@ -945,13 +943,16 @@ dc_dp_qos_class2prio_cb(int32_t port_id, struct net_device *netif, uint8_t *clas
         return DC_DP_FAILURE;
     }
 
+    /* FIXME : Drop the request except for the device reg_flags=DC_DP_F_QOS */
+
     /* Update local QoS Class2Priority map table */
     memcpy(p_devinfo->class2prio, class2prio, sizeof(p_devinfo->class2prio));
 
     ret = dc_dp_dcmode_wrapper_map_class2devqos(p_devinfo, port_id, netif, p_devinfo->class2prio, p_devinfo->prio2qos);
 
-    return DC_DP_SUCCESS;
+    return ret;
 }
+EXPORT_SYMBOL(dc_dp_qos_class2prio);
 
 int32_t
 dc_dp_get_dev_specific_desc_info(int32_t port_id, struct sk_buff *skb,

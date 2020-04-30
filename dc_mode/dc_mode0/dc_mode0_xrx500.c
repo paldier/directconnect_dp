@@ -65,6 +65,7 @@
     #define XRX500_DCMODE0_MAX_DEV_PORT_NUM    2
 #endif /* #else */
 #define XRX500_DCMODE0_UMT_PERIOD_DEFAULT     200 /* in micro second (GRX350/550) */
+#define XRX500_DCMODE0_UMT_MSG1_PERIOD_DEFAULT 40 /* in micro second (GRX350/550) */
 
 #define DC_DP_MAX_SOC_CLASS        16
 
@@ -221,7 +222,7 @@ xrx500_restore_tmu_queuemap(int32_t port_id);
 static inline int32_t
 xrx500_setup_umt_port(struct xrx500_dcmode0_dev_info *dev_ctx, int32_t port_id, struct dc_dp_res *res, uint32_t flags);
 static inline void
-xrx500_cleanup_umt_port(int32_t port_id, uint32_t umt_id);
+xrx500_cleanup_umt_port(int32_t port_id, uint32_t umt_id, uint32_t umt_period);
 static inline uint8_t
 _dc_dp_get_class2devqos(uint8_t *class2prio, uint8_t *prio2devqos, uint8_t class);
 
@@ -1014,6 +1015,7 @@ xrx500_setup_umt_port(struct xrx500_dcmode0_dev_info *dev_ctx, int32_t port_id, 
     uint32_t dma_cid = 0;
     uint32_t umt_id = 0;
     struct umt_set_mode umt_mode = {0};
+    uint32_t umt_period;
 
     /* Get the CBM logical pid */
     ret = cbm_get_wlan_umt_pid(port_id, &cbm_pid);
@@ -1035,7 +1037,19 @@ xrx500_setup_umt_port(struct xrx500_dcmode0_dev_info *dev_ctx, int32_t port_id, 
     umt_mode.msg_mode = UMT_MSG0_MSG1;
     umt_mode.phy_dst = (uint32_t)res->dccntr[0].dev2soc_ret_enq_phys_base;
     umt_mode.umt_ep_dst = (uint32_t)res->dccntr[0].dev2soc_ret_enq_base;
-    umt_mode.period = XRX500_DCMODE0_UMT_PERIOD_DEFAULT;
+
+    /* UMT period */
+    if (res->dccntr[0].dev2soc_dccntr_timer > XRX500_DCMODE0_UMT_PERIOD_DEFAULT)
+        umt_period = res->dccntr[0].dev2soc_dccntr_timer;
+    else
+        umt_period = XRX500_DCMODE0_UMT_PERIOD_DEFAULT;
+    umt_mode.period = umt_period;
+#if IS_ENABLED(CONFIG_LTQ_UMT_SW_MODE)
+    umt_mode.msg1_period = XRX500_DCMODE0_UMT_MSG1_PERIOD_DEFAULT;
+    if (umt_period < umt_mode.msg1_period)
+        umt_period = umt_mode.msg1_period;
+#endif
+
     umt_mode.enable = UMT_DISABLE;
     ret = ltq_umt_set_mode(umt_id, port_id, &umt_mode);
     if (ret) {
@@ -1050,25 +1064,25 @@ xrx500_setup_umt_port(struct xrx500_dcmode0_dev_info *dev_ctx, int32_t port_id, 
     dev_ctx->shared_info->dma_ctrlid = dma_ctrlid;
     dev_ctx->shared_info->dma_cid = dma_cid;
     dev_ctx->shared_info->dma_ch = _DMA_C(dma_ctrlid, DMA1TX_PORT, dma_cid);
-    dev_ctx->shared_info->umt_period = XRX500_DCMODE0_UMT_PERIOD_DEFAULT;
+    dev_ctx->shared_info->umt_period = umt_period;
 
     return ret;
 
 err_out_release_umt:
-    xrx500_cleanup_umt_port(port_id, umt_id);
+    xrx500_cleanup_umt_port(port_id, umt_id, umt_period);
 
 err_out:
     return ret;
 }
 
 static inline void
-xrx500_cleanup_umt_port(int32_t port_id, uint32_t umt_id)
+xrx500_cleanup_umt_port(int32_t port_id, uint32_t umt_id, uint32_t umt_period)
 {
     int32_t ret = 0;
 
 #if defined(CONFIG_LTQ_UMT_EXPAND_MODE)
     /* Delay for ongoing UMT transfer */
-    udelay(XRX500_DCMODE0_UMT_PERIOD_DEFAULT * 2);
+    udelay(umt_period * 2);
 
     /* Release UMT port */
     ret = ltq_umt_release(umt_id, port_id);
@@ -1375,7 +1389,9 @@ xrx500_dcmode0_register_dev_ex(void *ctx,
             xrx500_cleanup_ring_resources(dev_ctx, dev_ctx->shared_info->port_id, resources, flags);
 
             /* Cleanup UMT resources */
-            xrx500_cleanup_umt_port(dev_ctx->shared_info->port_id, dev_ctx->shared_info->umt_id);
+            xrx500_cleanup_umt_port(dev_ctx->shared_info->port_id,
+                                    dev_ctx->shared_info->umt_id,
+                                    dev_ctx->shared_info->umt_period);
         }
 
         /* Free DC Mode0 device context */
@@ -1474,7 +1490,9 @@ xrx500_dcmode0_register_dev_ex(void *ctx,
 
 err_out_res_pmac:
 err_out_rel_umt:
-    xrx500_cleanup_umt_port(dev_ctx->shared_info->port_id, dev_ctx->shared_info->umt_id);
+    xrx500_cleanup_umt_port(dev_ctx->shared_info->port_id,
+                            dev_ctx->shared_info->umt_id,
+                            dev_ctx->shared_info->umt_period);
 
 err_out_dereg_dev:
     /* Skip, iff Multiport sub-sequent device? */
@@ -1529,7 +1547,7 @@ xrx500_dcmode0_register_subif(void *ctx,
             }
 #endif /* #if defined(CONFIG_LTQ_UMT_EXPAND_MODE) */
             /* Delay for ongoing UMT transfer */
-            udelay(XRX500_DCMODE0_UMT_PERIOD_DEFAULT * 2);
+            udelay(dev_ctx->shared_info->umt_period * 2);
 
             /* Disable and Flush CBM/TMU Queue(s) */
             xrx500_flush_cbm_queue(subif.port_id);
@@ -1723,7 +1741,7 @@ static int32_t
 xrx500_dcmode0_return_bufs(void *ctx, uint32_t port_id,
                            void **buflist, uint32_t buflist_len, uint32_t flags)
 {
-    int32_t ret = DC_DP_FAILURE;
+    int32_t ret = DC_DP_SUCCESS;
     int32_t buf_idx;
     uint32_t **tmp_buflist;
     uint32_t buf_free_count = 0;
@@ -1939,27 +1957,6 @@ out:
  * Misclleneous API
  * ========================================================================
  */
-
-static int32_t
-xrx500_dcmode0_register_qos_class2prio_cb(void *ctx, int32_t port_id, struct net_device *netif,
-                                          int (*cb)(int32_t port_id, struct net_device *netif, uint8_t class2prio[]),
-                                          int32_t flags)
-{
-    int32_t ret = DC_DP_SUCCESS;
-
-#if IS_ENABLED(CONFIG_PPA)
-    struct xrx500_dcmode0_dev_info *dev_ctx = (struct xrx500_dcmode0_dev_info *)ctx;
-
-    /* Multiport sub-sequent device? */
-    if ( dev_ctx && is_multiport_sub(dev_ctx->alloc_flags) )
-        return DC_DP_SUCCESS;
-
-    if (ppa_register_qos_class2prio_hook_fn)
-        ret = ppa_register_qos_class2prio_hook_fn(port_id, netif, cb, flags);
-#endif /* #if IS_ENABLED(CONFIG_PPA) */
-
-    return ret;
-}
 
 static int32_t
 xrx500_dcmode0_map_class2devqos(void *ctx, int32_t port_id, struct net_device *netif,
@@ -2297,7 +2294,7 @@ static struct dc_dp_dcmode_ops xrx500_dcmode0_ops = {
     .disconn_if = xrx500_dcmode0_disconn_if,
     .get_netif_stats = xrx500_dcmode0_get_netif_stats,
     .clear_netif_stats = xrx500_dcmode0_clear_netif_stats,
-    .register_qos_class2prio_cb = xrx500_dcmode0_register_qos_class2prio_cb,
+    .register_qos_class2prio_cb = NULL,
     .map_class2devqos = xrx500_dcmode0_map_class2devqos,
     .alloc_skb = NULL,
     .free_skb = NULL,
@@ -2314,6 +2311,31 @@ static struct dc_dp_dcmode xrx500_dcmode0 = {
     .dcmode_ops = &xrx500_dcmode0_ops
 };
 
+#if IS_ENABLED(CONFIG_PPA)
+static int ppa_class2prio_event(PPA_NOTIFIER_BLOCK *nb,
+                                unsigned long action, void *ptr)
+{
+    struct ppa_class2prio_notifier_info *info;
+
+    switch (action) {
+    case PPA_CLASS2PRIO_DEFAULT:
+    case PPA_CLASS2PRIO_CHANGE:
+        info = (struct ppa_class2prio_notifier_info *)ptr;
+        if (info)
+            dc_dp_qos_class2prio(info->port_id, info->dev, info->class2prio);
+        break;
+    default:
+        break;
+    }
+
+    return PPA_NOTIFY_OK;
+}
+
+PPA_NOTIFIER_BLOCK ppa_class2prio_notifier = {
+	.notifier_call = ppa_class2prio_event
+};
+#endif
+
 static __init int xrx500_dcmode0_init_module(void)
 {
     int32_t ret = 0;
@@ -2328,6 +2350,8 @@ static __init int xrx500_dcmode0_init_module(void)
 
 #if IS_ENABLED(CONFIG_PPA)
         ppa_check_if_netif_fastpath_fn = dc_dp_check_if_netif_fastpath;
+
+        ppa_register_event_notifier(&ppa_class2prio_notifier);
 #endif /* #if IS_ENABLED(CONFIG_PPA) */
 
         g_dcmode0_init_ok = 1;
@@ -2340,6 +2364,7 @@ static __exit void xrx500_dcmode0_exit_module(void)
 {
     if (g_dcmode0_init_ok) {
 #if IS_ENABLED(CONFIG_PPA)
+        ppa_unregister_event_notifier(&ppa_class2prio_notifier);
         ppa_check_if_netif_fastpath_fn = NULL;
 #endif /* #if IS_ENABLED(CONFIG_PPA) */
 
